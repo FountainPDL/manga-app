@@ -1,0 +1,25 @@
+{
+	"appId": "com.fountainpdl.comifountain",
+	"appName": "ComiFountain",
+	"webDir": "dist",
+	"android": {
+		"allowMixedContent": true,
+		"captureInput": true,
+		"webContentsDebuggingEnabled": false
+	},
+	"plugins": {
+		"StatusBar": {
+			"style": "DARK",
+			"backgroundColor": "#00000000",
+			"overlaysWebView": true
+		},
+		"SplashScreen": {
+			"launchShowDuration": 0,
+			"backgroundColor": "#000000"
+		},
+		"Keyboard": {
+			"resize": "body",
+			"style": "DARK"
+		}
+	}
+}
