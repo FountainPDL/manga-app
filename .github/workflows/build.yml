@@ -15,11 +15,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Verify Node version
+        run: node --version
+
       - name: Install dependencies
         run: npm install
-
-      - name: Install Capacitor CLI globally
-        run: npm install -g @capacitor/cli
 
       - name: Build web app
         run: npm run build
@@ -34,7 +34,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Sync Capacitor
-        run: npx cap sync android
+        run: ./node_modules/.bin/cap sync android
 
       - name: Remove Termux aapt2 override
         run: grep -v "aapt2FromMavenOverride" android/gradle.properties > tmp && mv tmp android/gradle.properties || true
