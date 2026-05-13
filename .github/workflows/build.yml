@@ -34,7 +34,11 @@ jobs:
         run: node node_modules/@capacitor/cli/bin/capacitor sync android
 
       - name: Clean aapt2 override
-        run: grep -v "aapt2FromMavenOverride" android/gradle.properties > android/gradle.properties.tmp && mv android/gradle.properties.tmp android/gradle.properties || true
+        run: |
+          if grep -q "aapt2FromMavenOverride" android/gradle.properties 2>/dev/null; then
+            grep -v "aapt2FromMavenOverride" android/gradle.properties > android/gradle.properties.tmp
+            mv android/gradle.properties.tmp android/gradle.properties
+          fi
 
       - name: Build APK
         run: cd android && ./gradlew assembleDebug --no-daemon

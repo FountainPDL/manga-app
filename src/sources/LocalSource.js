@@ -1,249 +1,63 @@
-// ── LOCAL SOURCE ─────────────────────────────────────────────────
-// Handles locally stored manga on the device.
-//
-// FOLDER STRUCTURE EXPECTED:
-//   /Root Folder/
-//     Manga Title/           ← series folder
-//       Chapter 1/           ← chapter folder (images inside)
-//         001.jpg
-//         002.jpg
-//       Chapter 2.cbz        ← CBZ archive
-//     Another Manga.cbz      ← single CBZ at root = one manga
-//
-// HOW IT WORKS IN THE BROWSER (no native plugin needed):
-//   Uses <input type="file" webkitdirectory> to let user pick a folder
-//   All files come in as a flat FileList with their relativePaths
-//   We reconstruct the tree from relativePaths
+export const LocalSource={
+  id:'local',name:'Local Source',lang:'all',
+  isBuiltIn:true,isLocal:true,supportsSearch:true,supportsBrowse:true,
+  _files:{},_root:'',
 
-export const LocalSource = {
-  id:          'local',
-  name:        'Local Source',
-  lang:        'all',
-  isBuiltIn:   true,
-  isLocal:     true,
-  supportsSearch: true,
-  supportsBrowse: true,
-
-  // ── In-memory file tree built from the picked folder ──────────
-  _fileMap:  {},   // relativePath → File object
-  _rootName: '',   // name of root folder
-
-  // ── Called by SourcesPage when user picks a folder ────────────
-  loadFromFileList(fileList) {
-    this._fileMap  = {};
-    this._rootName = '';
-
-    const files = Array.from(fileList);
-    if (files.length === 0) return 0;
-
-    // webkitRelativePath = "RootFolder/SeriesName/Chapter1/001.jpg"
-    this._rootName = files[0].webkitRelativePath.split('/')[0];
-
-    for (const file of files) {
-      const path = file.webkitRelativePath;
-      this._fileMap[path] = file;
-    }
-
-    return files.length;
+  loadFromFileList(fl){
+    this._files={};
+    const arr=Array.from(fl);
+    if(!arr.length)return 0;
+    this._root=arr[0].webkitRelativePath.split('/')[0];
+    for(const f of arr)this._files[f.webkitRelativePath]=f;
+    return arr.length;
   },
 
-  // ── Get all unique series from the file tree ──────────────────
-  async browse() {
-    const paths = Object.keys(this._fileMap);
-    if (paths.length === 0) return [];
-
-    const seriesMap = {};
-
-    for (const path of paths) {
-      const parts = path.split('/');
-      // parts[0] = root, parts[1] = series name (or cbz at root)
-      if (parts.length < 2) continue;
-
-      const seriesName = parts[1];
-
-      if (!seriesMap[seriesName]) {
-        seriesMap[seriesName] = {
-          id:         `local:${seriesName}`,
-          title:      fileNameToTitle(seriesName),
-          cover:      null,
-          sourceId:   'local',
-          sourceName: 'Local Source',
-          local:      true,
-          _files:     [],
-        };
-      }
-      seriesMap[seriesName]._files.push(path);
-    }
-
-    // Find covers for each series
-    const result = [];
-    for (const key of Object.keys(seriesMap)) {
-      const series = seriesMap[key];
-      series.cover = await this._findCover(series._files);
-      delete series._files;
-      result.push(series);
-    }
-
-    return result.sort((a, b) => a.title.localeCompare(b.title));
+  async browse(){
+    const paths=Object.keys(this._files);if(!paths.length)return[];
+    const map={};
+    for(const p of paths){const parts=p.split('/');if(parts.length<2)continue;const n=parts[1];if(!map[n])map[n]={name:n,files:[]};map[n].files.push(p);}
+    const res=[];
+    for(const k of Object.keys(map)){const cov=await this._cover(map[k].files);res.push({id:`local:${k}`,title:toT(k),cover:cov,sourceId:'local',sourceName:'Local Source',local:true});}
+    return res.sort((a,b)=>a.title.localeCompare(b.title));
   },
 
-  async search(query) {
-    const all = await this.browse();
-    const q   = query.toLowerCase();
-    return all.filter((m) => m.title.toLowerCase().includes(q));
+  async search(q){return(await this.browse()).filter(m=>m.title.toLowerCase().includes(q.toLowerCase()));},
+
+  async getMangaDetails(id){
+    const name=id.replace('local:','');
+    const prefix=`${this._root}/${name}/`;
+    const paths=Object.keys(this._files).filter(p=>p.startsWith(prefix));
+    if(!paths.length)return null;
+    const cmap={};
+    for(const p of paths){const parts=p.split('/');if(parts.length<3)continue;const ch=parts[2];if(!cmap[ch])cmap[ch]=[];cmap[ch].push(p);}
+    const chapters=Object.keys(cmap).map((ch,i)=>({id:`local:${name}/${ch}`,title:toT(ch.replace(/\.(cbz|zip)$/i,'')),number:chN(ch),date:'',index:i,sourceId:'local',mangaId:id,_cbz:/\.(cbz|zip)$/i.test(ch)})).sort((a,b)=>parseFloat(a.number)-parseFloat(b.number));
+    const cover=await this._cover(paths);
+    return{id,title:toT(name),cover,description:'',genres:[],status:'Local',author:'',sourceId:'local',sourceName:'Local Source',local:true,chapters};
   },
 
-  // ── Get full details + chapter list for a series ──────────────
-  async getMangaDetails(id) {
-    const seriesName = id.replace('local:', '');
-    const paths      = Object.keys(this._fileMap)
-      .filter((p) => p.startsWith(`${this._rootName}/${seriesName}/`));
-
-    if (paths.length === 0) return null;
-
-    // Build chapter map: chapterFolder/cbz → [files]
-    const chapterMap = {};
-
-    for (const path of paths) {
-      const parts = path.split('/');
-      // parts[0]=root, parts[1]=series, parts[2]=chapter, parts[3]=image
-      if (parts.length < 3) continue;
-
-      const chapterName = parts[2];
-      if (!chapterMap[chapterName]) chapterMap[chapterName] = [];
-      chapterMap[chapterName].push(path);
-    }
-
-    const chapters = Object.keys(chapterMap).map((chName, i) => ({
-      id:       `local:${seriesName}/${chName}`,
-      title:    fileNameToTitle(chName),
-      number:   parseChNum(chName),
-      date:     '',
-      index:    i,
-      sourceId: 'local',
-      mangaId:  id,
-      _isCBZ:   chName.toLowerCase().endsWith('.cbz') || chName.toLowerCase().endsWith('.zip'),
-    })).sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
-
-    const allFiles = paths;
-    const cover    = await this._findCover(allFiles);
-
-    return {
-      id,
-      title:      fileNameToTitle(seriesName),
-      cover,
-      description: '',
-      genres:     [],
-      status:     'Local',
-      author:     '',
-      sourceId:   'local',
-      sourceName: 'Local Source',
-      local:      true,
-      chapters,
-    };
+  async getPageList(mangaId,chapterId){
+    const rel=chapterId.replace('local:','');const parts=rel.split('/');
+    const name=parts[0],ch=parts[1];if(!ch)return[];
+    if(/\.(cbz|zip)$/i.test(ch))return this._cbz(name,ch);
+    const prefix=`${this._root}/${name}/${ch}/`;
+    const imgs=Object.keys(this._files).filter(p=>p.startsWith(prefix)&&isImg(p)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+    return imgs.map((p,i)=>{const f=this._files[p];return f?{index:i,url:URL.createObjectURL(f),_obj:true}:null;}).filter(Boolean);
   },
 
-  // ── Get pages for a chapter ───────────────────────────────────
-  async getPageList(mangaId, chapterId) {
-    const parts      = chapterId.replace('local:', '').split('/');
-    const seriesName = parts[0];
-    const chapterName= parts[1];
-
-    if (!chapterName) return [];
-
-    const isCBZ = /\.(cbz|zip)$/i.test(chapterName);
-
-    if (isCBZ) {
-      return await this._extractCBZ(seriesName, chapterName);
-    }
-
-    // Folder of images
-    const prefix = `${this._rootName}/${seriesName}/${chapterName}/`;
-    const images = Object.keys(this._fileMap)
-      .filter((p) => p.startsWith(prefix) && isImagePath(p))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-    const pages = [];
-    for (let i = 0; i < images.length; i++) {
-      const file = this._fileMap[images[i]];
-      if (file) {
-        const url = URL.createObjectURL(file);
-        pages.push({ index: i, url, _objectUrl: true });
-      }
-    }
-    return pages;
+  async _cover(paths){
+    const f=paths.find(p=>isImg(p)&&/cover/i.test(p))||paths.find(p=>isImg(p));
+    if(!f)return null;const file=this._files[f];return file?URL.createObjectURL(file):null;
   },
 
-  // ── Internal helpers ──────────────────────────────────────────
-
-  async _findCover(filePaths) {
-    // Look for a file named "cover" or first image in first chapter
-    const coverFile = filePaths.find((p) =>
-      /cover\.(jpg|jpeg|png|webp)/i.test(p) && isImagePath(p)
-    );
-
-    const firstImage = coverFile || filePaths
-      .filter((p) => isImagePath(p))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))[0];
-
-    if (!firstImage) return null;
-
-    const file = this._fileMap[firstImage];
-    if (!file) return null;
-
-    return URL.createObjectURL(file);
+  async _cbz(name,file){
+    const p=`${this._root}/${name}/${file}`;const f=this._files[p];if(!f)return[];
+    try{const{default:JSZip}=await import('jszip');const zip=await JSZip.loadAsync(f);const names=Object.keys(zip.files).filter(n=>!zip.files[n].dir&&isImg(n)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));const pages=[];for(let i=0;i<names.length;i++){const blob=await zip.files[names[i]].async('blob');pages.push({index:i,url:URL.createObjectURL(blob),_obj:true});}return pages;}
+    catch(e){console.error('CBZ:',e);return[];}
   },
 
-  async _extractCBZ(seriesName, cbzName) {
-    const path = `${this._rootName}/${seriesName}/${cbzName}`;
-    const file = this._fileMap[path];
-    if (!file) return [];
-
-    try {
-      const { default: JSZip } = await import('jszip');
-      const zip   = await JSZip.loadAsync(file);
-      const names = Object.keys(zip.files)
-        .filter((n) => !zip.files[n].dir && isImagePath(n))
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-      const pages = [];
-      for (let i = 0; i < names.length; i++) {
-        const blob = await zip.files[names[i]].async('blob');
-        const url  = URL.createObjectURL(blob);
-        pages.push({ index: i, url, _objectUrl: true });
-      }
-      return pages;
-    } catch (e) {
-      console.error('CBZ extract error:', e);
-      return [];
-    }
-  },
-
-  // ── Cleanup object URLs when done reading ─────────────────────
-  revokePages(pages) {
-    for (const p of pages) {
-      if (p._objectUrl && p.url?.startsWith('blob:')) {
-        URL.revokeObjectURL(p.url);
-      }
-    }
-  },
+  revokePages(pages){for(const p of pages){if(p._obj&&p.url?.startsWith('blob:'))URL.revokeObjectURL(p.url);}},
 };
 
-// ── Helpers ───────────────────────────────────────────────────────
-function isImagePath(path) {
-  return /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(path);
-}
-
-function fileNameToTitle(name) {
-  return name
-    .replace(/\.(cbz|zip|cbr)$/i, '')
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
-}
-
-function parseChNum(name) {
-  const clean = name.replace(/\.(cbz|zip|cbr)$/i, '');
-  const m     = clean.match(/(\d+(?:\.\d+)?)/);
-  return m ? m[1] : '0';
-}
+const isImg=p=>/\.(jpg|jpeg|png|webp|gif|avif)$/i.test(p);
+const toT=s=>s.replace(/\.(cbz|zip|cbr)$/i,'').replace(/[-_]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()).trim();
+const chN=s=>{const m=s.replace(/\.(cbz|zip)$/i,'').match(/(\d+(?:\.\d+)?)/);return m?m[1]:'0';};
