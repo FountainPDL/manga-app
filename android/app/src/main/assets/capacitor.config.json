@@ -1,6 +1,6 @@
 {
-	"appId": "com.fountain.manga",
-	"appName": "manga-app",
+	"appId": "com.fountainpdl.comifountain",
+	"appName": "ComiFountain",
 	"webDir": "dist",
 	"android": {
 		"allowMixedContent": true,
